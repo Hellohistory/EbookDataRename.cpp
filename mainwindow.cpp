@@ -36,19 +36,28 @@ void MainGUI::selectTargetFolder() {
         tr("选择目标文件夹"),
         QDir::homePath(),
         QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks
-        );
+    );
 
     if (!selectedFolder.isEmpty()) {
         targetFolderLineEdit->setText(selectedFolder);
 
-        QMessageBox::StandardButton reply;
-        reply = QMessageBox::question(this, "检测到嵌套文件夹", "是否处理所有嵌套文件夹？",
-                                      QMessageBox::Yes | QMessageBox::No);
+        // 检查是否存在嵌套文件夹
+        QDir directory(selectedFolder);
+        QStringList subDirs = directory.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
 
-        if (reply == QMessageBox::Yes) {
-            tableViewManager->checkNestedFolders(selectedFolder); // 只调用一次
+        // 只有在存在嵌套文件夹时才询问用户
+        if (!subDirs.isEmpty()) {
+            QMessageBox::StandardButton reply;
+            reply = QMessageBox::question(this, tr("检测到嵌套文件夹"), tr("是否处理所有嵌套文件夹？"),
+                                          QMessageBox::Yes | QMessageBox::No);
+
+            if (reply == QMessageBox::Yes) {
+                // 如果用户同意处理嵌套文件夹，则递归调用
+                tableViewManager->checkNestedFolders(selectedFolder);
+            }
         }
 
+        // 更新主文件夹的文件到表格，此时应该更新行数
         tableViewManager->updateTableWidget(selectedFolder, true);
     }
 }
