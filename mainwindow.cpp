@@ -1,5 +1,7 @@
 #include "mainwindow.h"
 #include <QHeaderView>
+#include "worker.h"
+#include <QMessageBox>
 
 MainGUI::MainGUI(QWidget *parent) : QMainWindow(parent) {
     this->setWindowTitle("EbookDataRename");
@@ -9,26 +11,24 @@ MainGUI::MainGUI(QWidget *parent) : QMainWindow(parent) {
     this->setCentralWidget(centralWidget);
     QVBoxLayout *mainLayout = new QVBoxLayout(centralWidget);
 
-    this->setupLayout(mainLayout); // 首先设置布局和UI组件
+    this->setupLayout(mainLayout); // 设置布局和UI组件
 
-    // 然后创建 ModeManager 实例
     modeManager = new ModeManager(localModeRadioButton, local_db_lineedit, selectFolderButton, remote_url_lineedit, this);
-
-    // 初始模式更新
-    modeManager->updateMode();
-
-    // 连接信号和槽
-    connect(localModeRadioButton, &QRadioButton::toggled, this, &MainGUI::onModeChanged);
+    modeManager->updateMode(); // 初始模式更新
 
     tableViewManager = new TableViewManager(tableWidget);
+    connect(tableViewManager, &TableViewManager::progressUpdated, progressBar, &QProgressBar::setValue);
 
-    // 初始化 DatabaseManager 实例，这里假设先以空字符串初始化
-    dbManager = new DatabaseManager("");
+    connect(localModeRadioButton, &QRadioButton::toggled, this, &MainGUI::onModeChanged);
 
+    dbManager = new DatabaseManager(""); // 初始化 DatabaseManager 实例
     connect(queryButton, &QPushButton::clicked, this, [=]() {
         tableViewManager->updateTitlesFromDatabase(dbManager);
     });
+
+    connect(renameButton, &QPushButton::clicked, this, &MainGUI::initiateRenaming);
 }
+
 
 void MainGUI::selectTargetFolder() {
     QString selectedFolder = QFileDialog::getExistingDirectory(
@@ -41,13 +41,18 @@ void MainGUI::selectTargetFolder() {
     if (!selectedFolder.isEmpty()) {
         targetFolderLineEdit->setText(selectedFolder);
 
-        // 首先检查并处理嵌套文件夹
-        tableViewManager->checkNestedFolders(selectedFolder);
+        QMessageBox::StandardButton reply;
+        reply = QMessageBox::question(this, "检测到嵌套文件夹", "是否处理所有嵌套文件夹？",
+                                      QMessageBox::Yes | QMessageBox::No);
 
-        // 更新主文件夹的文件到表格，此时应该更新行数
+        if (reply == QMessageBox::Yes) {
+            tableViewManager->checkNestedFolders(selectedFolder); // 只调用一次
+        }
+
         tableViewManager->updateTableWidget(selectedFolder, true);
     }
 }
+
 
 void MainGUI::onModeChanged() {
     modeManager->updateMode();
@@ -64,40 +69,38 @@ void MainGUI::selectDatabase() {
 }
 
 void MainGUI::initiateRenaming() {
-    // 获取 filePathMap 的引用
+    progressBar->setMaximum(tableWidget->rowCount());
+    progressBar->setValue(0);
+
     const QMap<QString, QString>& filePathMap = tableViewManager->filePathMap();
 
-    // 遍历表格的所有行
-    for (int row = 0; row < tableWidget->rowCount(); ++row) {
-        // 获取原始文件名和新文件名
-        QTableWidgetItem *originalItem = tableWidget->item(row, 0);
-        QTableWidgetItem *newNameItem = tableWidget->item(row, 1);
+    // 创建工作线程
+    QThread *thread = new QThread;
+    Worker *worker = new Worker(filePathMap);
+    worker->moveToThread(thread);
 
-        if (originalItem && newNameItem) {
-            QString originalFileName = originalItem->text();
-            QString newFileName = newNameItem->text();
-
-            // 从 filePathMap 中获取原始文件的完整路径
-            QString originalFilePath = filePathMap.value(originalFileName);
-
-            // 检查是否需要执行重命名
-            if (!newFileName.isEmpty() && newFileName != "无此列" && newFileName != "无效的 SS_code" && newFileName != "已找到记录") {
-                // 构建新文件的完整路径
-                QFileInfo fileInfo(originalFilePath);
-                QString newFilePath = fileInfo.absoluteDir().absoluteFilePath(newFileName);
-
-                // 执行重命名
-                if (QFile::rename(originalFilePath, newFilePath)) {
-                    // 更新状态列为“已重命名”
-                    tableWidget->setItem(row, 2, new QTableWidgetItem("已重命名"));
-                } else {
-                    // 更新状态列为“重命名失败”
-                    tableWidget->setItem(row, 2, new QTableWidgetItem("重命名失败"));
-                }
-            }
+    // 连接Worker的信号到MainGUI的槽
+    connect(worker, &Worker::progressUpdated, this, [=](int progress){
+        progressBar->setValue(progress);
+    });
+    connect(worker, &Worker::renameResult, this, [=](int row, bool success){
+        QString status = success ? "已重命名" : "重命名失败";
+                             if (row < tableWidget->rowCount()) {
+            tableWidget->setItem(row, 2, new QTableWidgetItem(status));
         }
-    }
+    });
+    connect(worker, &Worker::finished, this, [=](){
+        progressBar->setValue(tableWidget->rowCount());
+        thread->quit();
+        worker->deleteLater();
+        thread->deleteLater();
+    });
+    connect(thread, &QThread::started, worker, &Worker::process);
+
+    // 开始线程
+    thread->start();
 }
+
 
 
 void MainGUI::setupLayout(QVBoxLayout *mainLayout) {
@@ -164,7 +167,14 @@ void MainGUI::setupLayout(QVBoxLayout *mainLayout) {
 }
 
 MainGUI::~MainGUI() {
+    // 如果线程正在运行，则等待它完成
+    if (workerThread.isRunning()) {
+        workerThread.quit();
+        workerThread.wait();
+    }
+
     delete dbManager; // 清理 DatabaseManager 实例
     delete tableViewManager; // 清理 TableViewManager 实例
     delete modeManager; // 清理 ModeManager 实例
 }
+

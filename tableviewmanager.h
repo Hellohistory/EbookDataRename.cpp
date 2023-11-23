@@ -7,15 +7,18 @@
 #include <QDir>
 #include "databasemanager.h"
 
-class TableViewManager {
+class TableViewManager : public QObject {
+    Q_OBJECT // 必须添加这个宏来支持信号和槽
+
 public:
     explicit TableViewManager(QTableWidget *tableWidget);
     void updateTableWidget(const QString &folderPath, bool updateRowCount);
     void updateTitlesFromDatabase(DatabaseManager *dbManager);
     void checkNestedFolders(const QString &folderPath);
-
-    // 添加一个公共方法来获取文件路径映射
     const QMap<QString, QString>& filePathMap() const;
+
+signals:
+    void progressUpdated(int value); // 添加进度更新信号
 
 private:
     QTableWidget *m_tableWidget;

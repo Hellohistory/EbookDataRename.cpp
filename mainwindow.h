@@ -12,9 +12,10 @@
 #include <QCheckBox>
 #include <QFileDialog>
 #include <QTableWidgetItem>
+#include <QThread> // 引入 QThread 类
 #include "mode_manager.h"
 #include "tableviewmanager.h"
-#include "databasemanager.h" // 引入 DatabaseManager 类
+#include "databasemanager.h"
 
 class MainGUI : public QMainWindow {
     Q_OBJECT
@@ -39,9 +40,12 @@ private:
     QCheckBox *changeExtensionCheckBox, *traditionalSimplifiedCheckBox;
     QTableWidget *tableWidget;
     QProgressBar *progressBar;
+
+    // 成员变量
     ModeManager *modeManager; // ModeManager 实例
     TableViewManager *tableViewManager; // TableViewManager 实例
     DatabaseManager *dbManager; // DatabaseManager 实例
+    QThread workerThread; // 用于文件重命名操作的线程
 };
 
 #endif // MAINWINDOW_H
